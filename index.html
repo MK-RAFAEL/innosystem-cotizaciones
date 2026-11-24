@@ -315,7 +315,7 @@ dialog::backdrop { background: #19163280; }
     <main class="main">
       <header class="topbar">
         <div class="breadcrumbs"><span>Documentos</span><svg class="icon"><use href="#i-chevron"/></svg><strong id="breadcrumb">Nueva cotización</strong></div>
-        <div class="account-actions"><button type="button" class="button button-secondary" id="account">Conectar historial privado</button><button type="button" class="button button-quiet" id="history-button"><svg class="icon"><use href="#i-clock"/></svg><span>Historial</span></button></div>
+        <div class="account-actions"><button type="button" class="button button-secondary" id="account">Guardar en mi PC</button><button type="button" class="button button-quiet" id="history-button"><svg class="icon"><use href="#i-clock"/></svg><span>Historial</span></button></div>
       </header>
       <div class="workspace" id="editor">
         <div class="page-heading">
@@ -388,19 +388,12 @@ dialog::backdrop { background: #19163280; }
   </div>
 
   <dialog id="account-dialog" aria-labelledby="account-title">
-    <form id="account-form">
-      <div class="dialog-heading"><div><h2 id="account-title">Historial privado</h2><p id="cloud-status" role="status"></p></div><button type="button" class="icon-button" data-close="account-dialog" aria-label="Cerrar">×</button></div>
-      <div id="account-connect">
-        <p>Conecta este dispositivo a la cuenta MK-RAFAEL. Se incorporarán sus documentos guardados al historial privado.</p>
-        <ol><li><a href="https://github.com/settings/personal-access-tokens/new?name=InnoSystem%20historial&amp;target_name=MK-RAFAEL&amp;contents=write" target="_blank" rel="noopener noreferrer">Crear una clave de acceso en GitHub</a>.</li><li>En <b>Repository access</b>, selecciona solo <b>innosystem-historial-privado</b>. En <b>Contents</b>, elige <b>Read and write</b>.</li><li>Genera la clave y pégala aquí.</li></ol>
-        <label>Clave de acceso privada<input id="cloud-key" type="password" autocomplete="off" spellcheck="false"></label>
-        <p>La conexión dura mientras mantengas esta pestaña abierta. Puedes volver a conectarte para recuperar el historial.</p>
-      </div>
-      <div class="dialog-actions">
-        <button class="button button-secondary" type="button" id="disconnect" hidden>Desconectar</button>
-        <button class="button button-primary" type="submit" id="cloud-submit">Conectar y sincronizar</button>
-      </div>
-    </form>
+    <div class="dialog-heading"><div><h2 id="account-title">Guardado del historial</h2><p id="disk-status" role="status"></p></div><button type="button" class="icon-button" data-close="account-dialog" aria-label="Cerrar">×</button></div>
+    <p id="folder-help">En tu PC, elige la carpeta <strong>Historial InnoSystem</strong> dentro de <strong>Escritorio → Cotizaciones</strong>. Al pulsar Guardar, tus cotizaciones y facturas se escribirán allí. Se incluirán los documentos anteriores de este navegador.</p>
+    <button class="button button-primary" type="button" id="select-folder">Elegir carpeta</button>
+    <p>Para llevar documentos a otro equipo, descarga una copia y usa «Incorporar copia» en el otro dispositivo.</p>
+    <div class="dialog-actions"><button class="button button-secondary" id="export-history" type="button">Descargar copia</button><button class="button button-secondary" id="import-history" type="button">Incorporar copia</button></div>
+    <input type="file" id="history-file" accept=".json,application/json" hidden>
   </dialog>
   <dialog id="pdf-dialog" aria-labelledby="pdf-dialog-title">
     <div class="dialog-heading"><div><h2 id="pdf-dialog-title">Documento PDF</h2><p>Descarga el PDF para enviarlo al cliente o ábrelo para imprimir.</p></div><button type="button" class="icon-button" data-close="pdf-dialog" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button></div>
@@ -611,106 +604,180 @@ async function makeCustomerPdf(paper, doc) {
 <script>
 "use strict";
 
-const privateHistory = (() => {
-  const repo = "https://api.github.com/repos/MK-RAFAEL/innosystem-historial-privado";
-  const file = repo + "/contents/historial.json";
-  const sessionKey = "innosystem-private-history-session";
-  let token = "";
-  try { token = sessionStorage.getItem(sessionKey) || ""; } catch {}
+// The browser remembers the directory handle; the records themselves live on disk.
+const diskHistory = (() => {
+  const primary = "historial.json";
+  const previous = "historial-anterior.json";
+  const folderName = "Historial InnoSystem";
+  const permission = { mode: "readwrite" };
+  let directory = null;
+  let authorized = false;
+  const pendingDrafts = new Map();
+  let draftQueue = Promise.resolve();
 
-  async function request(url, options = {}) {
+  async function registry(writeHandle) {
+    const db = await new Promise((resolve, reject) => {
+      const open = indexedDB.open("innosystem-carpeta", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("ubicacion");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
     try {
-      return await fetch(url, {
-        ...options, redirect: "error", cache: "no-store", credentials: "omit",
-        signal: AbortSignal.timeout(25000),
-        headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
-          ...options.headers },
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("ubicacion", writeHandle ? "readwrite" : "readonly");
+        const store = tx.objectStore("ubicacion");
+        const request = writeHandle ? store.put(writeHandle, "pc") : store.get("pc");
+        tx.oncomplete = () => resolve(request.result);
+        tx.onabort = () => reject(tx.error);
       });
-    } catch {
-      throw new Error("No se pudo contactar con GitHub. Revisa la conexión y vuelve a intentarlo.");
-    }
+    } finally { db.close(); }
   }
 
-  function requireSuccess(response) {
-    if (response.ok) return;
-    if ([401, 403, 404].includes(response.status)) {
-      throw new Error("Comprueba que la clave esté vigente y tenga permiso de lectura y escritura en el repositorio privado.");
+  const ready = registry().then(async handle => {
+    directory = handle || null;
+    authorized = Boolean(handle && await handle.queryPermission(permission) === "granted");
+  }).catch(() => {});
+
+  async function connect(chooseAnother = false) {
+    if (!chooseAnother && directory && await directory.requestPermission(permission) === "granted") {
+      authorized = true;
+      return;
     }
-    throw new Error("GitHub no pudo completar la sincronización (" + response.status + "). Inténtalo de nuevo.");
+    const selected = await window.showDirectoryPicker({ ...permission, id: "innosystem-historial", startIn: "desktop" });
+    const folder = selected.name === folderName ? selected : await selected.getDirectoryHandle(folderName, { create: true });
+    directory = folder;
+    authorized = true;
+    await registry(folder);
   }
 
-  function encode(data) {
-    const bytes = new TextEncoder().encode(JSON.stringify(data));
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    return btoa(binary);
+  function checked(data) {
+    if (!data || !Array.isArray(data.docs) || !data.company || typeof data.company !== "object" ||
+        !Number.isSafeInteger(data.nextQuote) || !Number.isSafeInteger(data.nextInvoice) ||
+        !data.docs.every(doc => doc && typeof doc.id === "string" && typeof doc.client === "string" &&
+          ["quote", "invoice"].includes(doc.kind) && typeof doc.number === "string" &&
+          typeof doc.date === "string" && doc.company && Array.isArray(doc.items) &&
+          doc.items.every(item => item && typeof item.ref === "string" && typeof item.description === "string"))) {
+      throw new Error("El archivo no contiene un historial válido de InnoSystem.");
+    }
+    return data;
   }
 
-  async function read() {
-    const response = await request(file + "?ref=main");
-    if (response.status === 404) return null;
-    requireSuccess(response);
-    const item = await response.json();
-    let raw;
-    if (item.encoding === "base64") {
-      raw = new TextDecoder().decode(Uint8Array.from(atob(item.content), c => c.charCodeAt(0)));
-    } else {
-      const blob = await request(repo + "/git/blobs/" + item.sha, { headers: { Accept: "application/vnd.github.raw+json" } });
-      requireSuccess(blob);
-      raw = await blob.text();
-    }
-    const data = JSON.parse(raw);
-    if (data.format !== 1 || !Array.isArray(data.docs) || !Number.isSafeInteger(data.nextQuote) ||
-        !Number.isSafeInteger(data.nextInvoice) || !data.docs.every(doc => doc.id && doc.number && Array.isArray(doc.items))) {
-      throw new Error("El historial privado tiene un formato desconocido. Se conservó la copia local.");
-    }
-    return { sha: item.sha, data };
+  async function readFile(name) {
+    let handle;
+    try { handle = await directory.getFileHandle(name); }
+    catch (error) { if (error.name === "NotFoundError") return null; throw error; }
+    const raw = await (await handle.getFile()).text();
+    return checked(JSON.parse(raw.replace(/^\uFEFF/, "")));
   }
 
-  async function transact(local, change) {
-    const response = await request(repo);
-    requireSuccess(response);
-    const repository = await response.json();
-    if (repository.private !== true || repository.id !== 1469529542) {
-      throw new Error("Para guardar documentos, el repositorio del historial debe ser privado.");
-    }
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const remote = await read();
-      if (!remote && local.paired) throw new Error("No se encontró el historial privado. Se conservó la copia de este dispositivo.");
-      const data = remote?.data ?? { format: 1, company: {}, docs: [], nextQuote: 1, nextInvoice: 1 };
-      const ids = new Set(data.docs.map(doc => doc.id));
-      // Import documents unique to this device, even when different devices used the same printed number.
-      const additions = local.docs.filter(doc => !ids.has(doc.id));
-      data.docs.push(...additions);
-      data.nextQuote = Math.max(data.nextQuote, local.nextQuote);
-      data.nextInvoice = Math.max(data.nextInvoice, local.nextInvoice);
-      const importCompany = !Object.keys(data.company).length && Object.keys(local.company).length > 0;
-      if (importCompany) data.company = local.company;
-      const result = change?.(data);
-      if (change || !remote || additions.length || importCompany) {
-        const update = await request(file, {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: "Guardar historial de InnoSystem", branch: "main",
-            content: encode(data), ...(remote ? { sha: remote.sha } : {}) }),
-        });
-        if (update.status === 409 || (update.status === 422 && !remote)) continue;
-        requireSuccess(update);
+  async function writeFile(name, data) {
+    const handle = await directory.getFileHandle(name, { create: true });
+    const stream = await handle.createWritable();
+    try {
+      await stream.write(JSON.stringify(data));
+      await stream.close();
+    } catch (error) { await stream.abort().catch(() => {}); throw error; }
+  }
+
+  function merge(target, source, importing = false) {
+    const known = new Map(target.docs.map(doc => [doc.id, doc]));
+    for (const doc of source.docs) {
+      const existing = known.get(doc.id);
+      if (!existing) { target.docs.push(doc); known.set(doc.id, doc); }
+      else if (doc.revision > existing.revision) {
+        target.docs[target.docs.indexOf(existing)] = doc;
+        known.set(doc.id, doc);
+      } else if (importing && doc.revision === existing.revision && JSON.stringify(doc) !== JSON.stringify(existing)) {
+        throw new Error("La copia tiene cambios distintos en " + doc.number + ". No se modificó el historial.");
       }
-      return { database: { ...data, paired: true }, result };
     }
-    throw new Error("El historial cambió mientras guardabas. Tu borrador sigue disponible. Pulsa Guardar para reintentar.");
+    if (!Object.keys(target.company).length) target.company = source.company;
+    target.nextQuote = Math.max(target.nextQuote, source.nextQuote);
+    target.nextInvoice = Math.max(target.nextInvoice, source.nextInvoice);
   }
-  return {
-    transact,
-    get connected() { return Boolean(token); },
-    setToken(value, remember = false) {
-      token = value;
+
+  async function transact(cache, change) {
+    if (!directory || await directory.queryPermission(permission) !== "granted") {
+      authorized = false;
+      throw new Error("Pulsa «Guardar en mi PC» para dar acceso a la carpeta de tu historial.");
+    }
+    // Hold an exclusive lock while reading and replacing the snapshot, including across origins.
+    const guard = await directory.getFileHandle("control.lock", { create: true });
+    const lock = await guard.createWritable({ mode: "exclusive" });
+    try {
+      let original;
+      try { original = await readFile(primary); }
+      catch (error) {
+        if (error instanceof DOMException) throw error;
+        if (!await readFile(previous)) throw new Error("No se pudo leer el historial. Los archivos se conservaron.");
+      }
+      const fallback = original ? null : await readFile(previous);
+      const data = structuredClone(original || fallback || { format: 1, docs: [], company: {}, nextQuote: 1, nextInvoice: 1 });
+      const before = original && JSON.stringify(original);
+      merge(data, cache);
+      const result = change?.(data);
+      if (before !== JSON.stringify(data)) {
+        if (original) await writeFile(previous, original);
+        await writeFile(primary, data);
+        if (!original && !fallback) await writeFile(previous, data);
+      }
+      return { database: data, result };
+    } finally { await lock.abort(); }
+  }
+
+  function draftFile(key) {
+    const id = key.replace(/^innosystem-draft:/, "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Identificador de borrador inválido.");
+    return id + ".json";
+  }
+
+  function queueDraft(key, raw, remove = false) {
+    if (!authorized) return Promise.resolve();
+    const folder = directory;
+    const job = { raw, remove };
+    pendingDrafts.set(key, job);
+    const run = async () => {
+      if (pendingDrafts.get(key) !== job) return;
       try {
-        if (remember && token) sessionStorage.setItem(sessionKey, token);
-        else sessionStorage.removeItem(sessionKey);
-      } catch {}
-    },
-  };
+        const drafts = await folder.getDirectoryHandle("borradores", { create: true });
+        const name = draftFile(key);
+        if (remove) {
+          try {
+            const handle = await drafts.getFileHandle(name);
+            if (await (await handle.getFile()).text() === raw) await drafts.removeEntry(name);
+          } catch (error) { if (error.name !== "NotFoundError") throw error; }
+        } else {
+          const handle = await drafts.getFileHandle(name, { create: true });
+          const stream = await handle.createWritable();
+          try { await stream.write(raw); await stream.close(); }
+          catch (error) { await stream.abort().catch(() => {}); throw error; }
+        }
+      } finally {
+        if (pendingDrafts.get(key) === job) pendingDrafts.delete(key);
+      }
+    };
+    const operation = draftQueue.then(run);
+    draftQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async function recoverDrafts() {
+    const folder = await directory.getDirectoryHandle("borradores", { create: true });
+    for await (const [name, handle] of folder.entries()) {
+      if (handle.kind !== "file" || !/^[0-9a-f-]{36}\.json$/i.test(name)) continue;
+      const key = "innosystem-draft:" + name.slice(0, -5);
+      if (localStorage.getItem(key) !== null) continue;
+      let raw;
+      try { raw = await (await handle.getFile()).text(); }
+      catch (error) { if (error.name === "NotFoundError") continue; throw error; }
+      if (!raw) continue;
+      const doc = JSON.parse(raw);
+      if (["quote", "invoice"].includes(doc.kind) && Array.isArray(doc.items)) localStorage.setItem(key, raw);
+    }
+  }
+  return { ready, connect, transact, checked, merge, queueDraft, recoverDrafts,
+    get active() { return authorized; }, get configured() { return Boolean(directory); },
+    get supported() { return typeof window.showDirectoryPicker === "function"; } };
 })();
 
 </script>
@@ -769,15 +836,16 @@ try {
 let transactionQueue = Promise.resolve();
 function transact(change) {
   const write = async () => {
+    await diskHistory.ready;
     const fresh = readDatabase();
-    if (fresh.paired && !privateHistory.connected) throw new Error("Conecta tu historial privado para guardar. Tu borrador se conserva en este dispositivo.");
     let next = fresh, result;
-    if (privateHistory.connected) {
-      const synced = await privateHistory.transact(fresh, change);
+    if (diskHistory.configured || localStorage.getItem("innosystem-disk-configured")) {
+      const synced = await diskHistory.transact(fresh, change);
       next = synced.database;
       result = synced.result;
     } else result = change?.(fresh);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); }
+    catch (error) { if (!diskHistory.active) throw error; }
     database = next;
     return result;
   };
@@ -813,6 +881,7 @@ function keepDraft() {
     localStorage.setItem(draftKey, raw);
     lastDraft = raw;
     draftSafe = true;
+    diskHistory.queueDraft(draftKey, raw).catch(() => notify("Este borrador sigue en el navegador. No se pudo copiar a la carpeta de la PC.", true));
   } catch {
     draftSafe = false;
     notify("El navegador no pudo conservar este borrador. Mantén la página abierta.", true);
@@ -1118,7 +1187,10 @@ async function saveDocument() {
     return record;
   });
   current = saved;
-  if (lastDraft && localStorage.getItem(draftKey) === lastDraft) localStorage.removeItem(draftKey);
+  if (lastDraft && localStorage.getItem(draftKey) === lastDraft) {
+    localStorage.removeItem(draftKey);
+    await diskHistory.queueDraft(draftKey, lastDraft, true).catch(() => notify("El documento está guardado. Su borrador podría seguir en la carpeta.", true));
+  }
   lastDraft = null;
   draftSafe = false;
   renderItems();
@@ -1138,13 +1210,14 @@ async function handleDocument(action) {
   if (busy || !validate()) return;
   setBusy(true);
   try {
-    if (dirty || !current.number) await saveDocument();
+    if (dirty || !current.number) {
+      await diskHistory.ready;
+      if (diskHistory.supported && !diskHistory.active) await connectDisk();
+      await saveDocument();
+    }
     await action();
   } catch (error) {
-    const message = error instanceof DOMException || error instanceof SyntaxError
-      ? "No se pudo guardar. Revisa que el navegador permita el almacenamiento local."
-      : error.message;
-    notify(message, true);
+    notify(storageError(error), true);
   } finally {
     setBusy(false);
   }
@@ -1195,7 +1268,7 @@ $("#items").onclick = (event) => {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  handleDocument(() => notify(titleFor(current.kind) + " " + current.number + " guardada."));
+  handleDocument(() => notify(titleFor(current.kind) + " " + current.number + (diskHistory.active ? " guardada en la PC." : " guardada en este navegador.")));
 });
 window.addEventListener("beforeprint", preparePrint);
 let pdfUrl;
@@ -1209,7 +1282,6 @@ $("#print").onclick = () => handleDocument(async () => {
   $("#pdf-dialog").showModal();
 });
 $("#convert").onclick = () => handleDocument(() => {
-  database = readDatabase();
   const linked = linkedInvoice();
   if (linked) {
     loadEditor(linked);
@@ -1306,84 +1378,98 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 let refreshing = false;
-let lastSyncError = "";
-function updateAccount() {
-  const connected = privateHistory.connected;
-  $("#account").textContent = connected ? (lastSyncError ? "Revisar conexión" : "Historial privado") : "Conectar historial privado";
-  $("#cloud-status").textContent = lastSyncError || (connected ? "Conectado a MK-RAFAEL." : "Conexión con tu cuenta de GitHub.");
-  $("#account-connect").hidden = connected;
-  $("#disconnect").hidden = !connected;
-  $("#cloud-submit").textContent = connected ? "Actualizar historial" : "Conectar y sincronizar";
-  $("#history-description").textContent = lastSyncError || (connected ? "Cotizaciones y facturas de tu cuenta privada." :
-    database.paired ? "Copia de este dispositivo. Conecta tu cuenta para actualizarla." : "Documentos de este dispositivo. Conecta tu cuenta para sincronizarlos.");
+let diskError = "";
+function updateStorageStatus() {
+  const active = diskHistory.active;
+  const message = diskError || (active ? "Cotizaciones y facturas guardadas en la carpeta Historial InnoSystem." :
+    diskHistory.configured ? "Autoriza el acceso a tu carpeta para guardar en la PC." : "Por ahora, los documentos se guardan en este navegador.");
+  $("#account").textContent = active ? "Historial de la PC" : diskHistory.supported ? "Guardar en mi PC" : "Copias del historial";
+  $("#disk-status").textContent = $("#history-description").textContent = message;
+  $("#folder-help").hidden = active || !diskHistory.supported;
+  $("#select-folder").hidden = !diskHistory.supported;
+  $("#select-folder").textContent = active ? "Cambiar de carpeta" : diskHistory.configured ? "Autorizar carpeta" : "Elegir carpeta";
 }
-
+function storageError(error) {
+  if (error.name === "AbortError") return "Se canceló la selección. Tu borrador sigue en el navegador.";
+  if (["SecurityError", "NotAllowedError"].includes(error.name)) return "Abre la página en Chrome o Edge y permite el acceso a la carpeta.";
+  if (error.name === "NoModificationAllowedError") return "La carpeta está en uso. Vuelve a pulsar Guardar.";
+  return error.message || "No se pudo escribir el historial.";
+}
+async function connectDisk(chooseAnother = false) {
+  await diskHistory.connect(chooseAnother);
+  localStorage.setItem("innosystem-disk-configured", "1");
+  await transact();
+  await diskHistory.recoverDrafts();
+  for (const {key} of drafts()) await diskHistory.queueDraft(key, localStorage.getItem(key));
+  diskError = "";
+  if (!dirty && !current.number && !current.quoteId) current.company = { ...database.company };
+  updateStorageStatus();
+}
 async function refreshHistory() {
-  if (refreshing || !privateHistory.connected || busy) return;
+  if (refreshing || !diskHistory.active || busy) return;
   refreshing = true;
   try {
     await transact();
-    lastSyncError = "";
+    diskError = "";
     if (!$("#history").hidden) renderHistory();
     else renderHeading();
-  } catch (error) {
-    lastSyncError = error.message;
-  } finally {
-    refreshing = false;
-    updateAccount();
-  }
+  } catch (error) { diskError = storageError(error); }
+  finally { refreshing = false; updateStorageStatus(); }
 }
-
 $("#account").onclick = () => {
-  updateAccount();
+  updateStorageStatus();
   $("#account-dialog").showModal();
 };
-$("#account-form").onsubmit = async event => {
-  event.preventDefault();
-  const input = $("#cloud-key");
-  const connecting = !privateHistory.connected;
-  if (connecting && !input.value.trim()) { input.focus(); return; }
-  const key = input.value.trim();
-  if (connecting && !key.startsWith("github_pat_")) {
-    $("#cloud-status").textContent = "Usa una clave de acceso de permisos específicos (fine-grained).";
-    return;
-  }
-  const submit = $("#cloud-submit");
-  submit.disabled = true;
-  $("#disconnect").disabled = true;
-  $("#cloud-status").textContent = "Sincronizando el historial…";
+$("#select-folder").onclick = async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
-    if (connecting) privateHistory.setToken(key);
-    await transact();
-    if (connecting) privateHistory.setToken(key, true);
-    input.value = "";
-    lastSyncError = "";
-    if (!dirty && !current.number && !current.quoteId) current.company = { ...database.company };
+    await connectDisk(diskHistory.active);
+    $("#account-dialog").close();
+    if (dirty) showEditor(); else showHistory("quotes");
+    notify("Carpeta preparada. Los documentos guardados están en tu PC.");
+  } catch (error) { diskError = storageError(error); }
+  finally { button.disabled = false; updateStorageStatus(); }
+};
+$("#export-history").onclick = async () => {
+  try {
+    if (diskHistory.active) await transact();
+    const data = diskHistory.active ? database : readDatabase();
+    const file = new Blob([JSON.stringify({ ...data, format: 1 })], { type: "application/json" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "InnoSystem-historial-" + today() + ".json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) { $("#disk-status").textContent = storageError(error); }
+};
+$("#import-history").onclick = () => $("#history-file").click();
+$("#history-file").onchange = async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const data = diskHistory.checked(JSON.parse((await file.text()).replace(/^\uFEFF/, "")));
+    await transact(target => diskHistory.merge(target, data, true));
     $("#account-dialog").close();
     showHistory("quotes");
-    notify("Historial privado sincronizado.");
-  } catch (error) {
-    if (connecting) privateHistory.setToken("");
-    lastSyncError = error.message;
-  } finally {
-    submit.disabled = false;
-    $("#disconnect").disabled = false;
-    updateAccount();
-  }
-};
-$("#disconnect").onclick = () => {
-  privateHistory.setToken("");
-  lastSyncError = "";
-  updateAccount();
-  $("#account-dialog").close();
-  notify("Sesión desconectada. Este navegador conserva su copia del historial.");
+    notify(diskHistory.active ? "Copia incorporada al historial de la PC." : "Copia incorporada al historial del navegador.");
+  } catch (error) { $("#disk-status").textContent = storageError(error); }
+  finally { event.target.value = ""; }
 };
 window.addEventListener("focus", refreshHistory);
-window.addEventListener("online", refreshHistory);
-setInterval(() => { if (document.visibilityState === "visible") refreshHistory(); }, 60000);
 loadEditor(current);
-updateAccount();
-if (database.docs.length || drafts().length || privateHistory.connected) showHistory("quotes");
+updateStorageStatus();
+if (database.docs.length || drafts().length) showHistory("quotes");
+diskHistory.ready.then(async () => {
+  updateStorageStatus();
+  if (diskHistory.active) {
+    await refreshHistory();
+    try { await diskHistory.recoverDrafts(); }
+    catch { notify("No se pudieron cargar los borradores de la carpeta.", true); }
+    if (!dirty && !current.number && (database.docs.length || drafts().length)) showHistory("quotes");
+  }
+});
 if (startupError) notify("No se pudo leer el historial de este navegador.", true);
 
 </script>
