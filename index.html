@@ -111,6 +111,22 @@ textarea { resize: vertical; }
 .preview-heading h2 { font-size: 1.04rem; }
 .preview-heading p { margin: 3px 0 0; font-size: .8rem; color: var(--muted); }
 .paper-frame { padding: 16px; background: #eeebf5; border-block: 1px solid #e8e2f1; }
+@media screen {
+  .preview-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    max-height: calc(100vh - 36px);
+    max-height: calc(100dvh - 36px);
+  }
+  .paper-frame {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    scrollbar-color: #786695 #eeebf5;
+  }
+  .paper-frame:focus-visible { outline-offset: -3px; }
+}
 .preview-bottom { font-size: .8rem; color: var(--muted); padding: 13px 17px; }
 .preview-bottom span { display: flex; align-items: center; gap: 7px; }
 .preview-bottom .icon { width: 15px; height: 15px; color: #7356ac; }
@@ -207,7 +223,7 @@ dialog::backdrop { background: #19163280; }
   .page-heading h1 { font-size: clamp(1.8rem, 6vw, 2.35rem); }
   .page-actions > button { flex: 1; }
   .editor-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .preview-panel { position: static; }
+  .preview-panel { position: static; max-height: 78vh; max-height: 78dvh; }
   .mobile-preview { display: inline-flex; margin-left: auto; }
   .paper-frame .document { min-height: 0; }
   .item .icon-button { min-height: 44px; width: 44px; flex-basis: 44px; }
@@ -371,7 +387,7 @@ dialog::backdrop { background: #19163280; }
           </form>
           <aside class="preview-panel" aria-label="Vista previa del documento">
             <div class="preview-heading"><span class="section-icon"><svg class="icon"><use href="#i-eye"/></svg></span><div><h2>Vista previa</h2><p>Formato carta · RD$</p></div><button type="button" class="button button-quiet mobile-preview" aria-expanded="true" aria-controls="paper-frame" id="toggle-preview">Ocultar</button></div>
-            <div class="paper-frame" id="paper-frame"><article class="document" id="paper"></article></div>
+            <div class="paper-frame" id="paper-frame" role="region" aria-label="Documento de la vista previa" tabindex="0"><article class="document" id="paper"></article></div>
             <div class="preview-bottom"><span><svg class="icon"><use href="#i-print"/></svg> Listo para imprimir o guardar en PDF</span></div>
           </aside>
         </div>
@@ -1084,6 +1100,7 @@ function loadEditor(doc, resumeKey = null) {
   renderItems();
   showEditor();
   renderPreview();
+  $("#paper-frame").scrollTop = 0;
   window.scrollTo(0, 0);
 }
 

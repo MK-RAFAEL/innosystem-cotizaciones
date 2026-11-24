@@ -103,6 +103,22 @@ textarea { resize: vertical; }
 .preview-heading h2 { font-size: 1.04rem; }
 .preview-heading p { margin: 3px 0 0; font-size: .8rem; color: var(--muted); }
 .paper-frame { padding: 16px; background: #eeebf5; border-block: 1px solid #e8e2f1; }
+@media screen {
+  .preview-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    max-height: calc(100vh - 36px);
+    max-height: calc(100dvh - 36px);
+  }
+  .paper-frame {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    scrollbar-color: #786695 #eeebf5;
+  }
+  .paper-frame:focus-visible { outline-offset: -3px; }
+}
 .preview-bottom { font-size: .8rem; color: var(--muted); padding: 13px 17px; }
 .preview-bottom span { display: flex; align-items: center; gap: 7px; }
 .preview-bottom .icon { width: 15px; height: 15px; color: #7356ac; }
@@ -199,7 +215,7 @@ dialog::backdrop { background: #19163280; }
   .page-heading h1 { font-size: clamp(1.8rem, 6vw, 2.35rem); }
   .page-actions > button { flex: 1; }
   .editor-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .preview-panel { position: static; }
+  .preview-panel { position: static; max-height: 78vh; max-height: 78dvh; }
   .mobile-preview { display: inline-flex; margin-left: auto; }
   .paper-frame .document { min-height: 0; }
   .item .icon-button { min-height: 44px; width: 44px; flex-basis: 44px; }

@@ -300,6 +300,7 @@ function loadEditor(doc, resumeKey = null) {
   renderItems();
   showEditor();
   renderPreview();
+  $("#paper-frame").scrollTop = 0;
   window.scrollTo(0, 0);
 }
 
