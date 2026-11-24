@@ -27,7 +27,17 @@ function today() {
 
 function readDatabase() {
   const raw = localStorage.getItem(storageKey);
-  return raw ? JSON.parse(raw) : { company: {}, docs: [], nextQuote: 1, nextInvoice: 1 };
+  const db = raw ? JSON.parse(raw) : { company: {}, docs: [], nextQuote: 1, nextInvoice: 1 };
+  if (db.docs.some(doc => !doc.id)) {
+    const key = "innosystem-legacy-device";
+    const device = localStorage.getItem(key) || crypto.randomUUID();
+    localStorage.setItem(key, device);
+    for (const doc of db.docs) {
+      doc.id ||= device + "-" + doc.number;
+      if (doc.quoteNumber) doc.quoteId ||= device + "-" + doc.quoteNumber;
+    }
+  }
+  return db;
 }
 
 let database;
@@ -39,15 +49,25 @@ try {
   startupError = true;
 }
 
+let transactionQueue = Promise.resolve();
 function transact(change) {
-  const write = () => {
+  const write = async () => {
     const fresh = readDatabase();
-    const result = change(fresh);
-    localStorage.setItem(storageKey, JSON.stringify(fresh));
-    database = fresh;
+    if (fresh.paired && !privateHistory.connected) throw new Error("Conecta tu historial privado para guardar. Tu borrador se conserva en este dispositivo.");
+    let next = fresh, result;
+    if (privateHistory.connected) {
+      const synced = await privateHistory.transact(fresh, change);
+      next = synced.database;
+      result = synced.result;
+    } else result = change?.(fresh);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    database = next;
     return result;
   };
-  return navigator.locks ? navigator.locks.request(storageKey, write) : Promise.resolve().then(write);
+  const run = () => navigator.locks ? navigator.locks.request(storageKey, write) : write();
+  const operation = transactionQueue.then(run);
+  transactionQueue = operation.catch(() => {});
+  return operation;
 }
 
 const newItem = () => ({ ref: "", description: "", qty: "1", price: "0", discount: "0", rate: "18" });
@@ -64,6 +84,30 @@ let dirty = false;
 let busy = false;
 let listView = "quotes";
 let toastTimeout;
+const draftPrefix = "innosystem-draft:";
+let draftKey = draftPrefix + crypto.randomUUID();
+let draftSafe = false;
+let lastDraft = null;
+
+function keepDraft() {
+  try {
+    if (localStorage.getItem(draftKey) !== lastDraft) draftKey = draftPrefix + crypto.randomUUID();
+    const raw = JSON.stringify(current);
+    localStorage.setItem(draftKey, raw);
+    lastDraft = raw;
+    draftSafe = true;
+  } catch {
+    draftSafe = false;
+    notify("El navegador no pudo conservar este borrador. Mantén la página abierta.", true);
+  }
+}
+
+function drafts() {
+  try {
+    return Object.keys(localStorage).filter(key => key.startsWith(draftPrefix))
+      .map(key => ({ key, doc: JSON.parse(localStorage.getItem(key)) })).filter(entry => entry.doc);
+  } catch { return []; }
+}
 
 function notify(message, error = false) {
   const toast = $("#toast");
@@ -206,7 +250,7 @@ function renderPreview() {
 }
 
 function linkedInvoice() {
-  return current.number && database.docs.find((doc) => doc.quoteNumber === current.number);
+  return current.id && database.docs.find((doc) => doc.quoteId === current.id);
 }
 
 function renderHeading() {
@@ -218,7 +262,7 @@ function renderHeading() {
     ? "Generada a partir de la cotización " + current.quoteNumber + "."
     : "Registra el cliente y los servicios de instalación.";
   const status = $("#status");
-  status.textContent = current.number ? (dirty ? "Cambios sin guardar" : "Guardada") : "Borrador";
+  status.textContent = dirty && draftSafe ? "Borrador guardado en este dispositivo" : current.number ? (dirty ? "Cambios sin guardar" : "Guardada") : "Borrador";
   status.classList.toggle("saved", Boolean(current.number && !dirty));
   $("#conversion-bar").hidden = invoice || !current.number;
   $("#convert span").textContent = linkedInvoice() ? "Abrir factura asociada" : "Crear factura desde esta cotización";
@@ -238,9 +282,12 @@ function showEditor() {
   renderHeading();
 }
 
-function loadEditor(doc) {
+function loadEditor(doc, resumeKey = null) {
+  draftKey = resumeKey || draftPrefix + crypto.randomUUID();
+  lastDraft = resumeKey ? localStorage.getItem(resumeKey) : null;
+  draftSafe = Boolean(resumeKey);
   current = structuredClone(doc);
-  dirty = false;
+  dirty = Boolean(resumeKey);
   for (const key of documentFields) {
     form.elements[key].value = current[key];
     form.elements[key].setCustomValidity("");
@@ -256,6 +303,11 @@ function loadEditor(doc) {
 
 function renderHistory() {
   const query = $("#search").value.trim().toLocaleLowerCase("es");
+  const pending = drafts().filter(({ doc }) => viewFor(doc.kind) === listView &&
+    ((doc.client || "").toLowerCase().includes(query) || (doc.number || "").toLowerCase().includes(query)));
+  $("#draft-list").innerHTML = pending.length ? "<h2>Borradores de este dispositivo</h2>" + pending.map(({ key, doc }) =>
+    '<div class="history-row"><strong>' + escaped(doc.number || "Borrador") + '</strong><div>' + escaped(doc.client || "Sin nombre de cliente") +
+    '</div><span></span><button class="button button-secondary" data-draft="' + escaped(key) + '">Continuar</button></div>').join("") : "";
   const docs = database.docs.filter((doc) => viewFor(doc.kind) === listView &&
     (doc.client.toLocaleLowerCase("es").includes(query) || doc.number.toLowerCase().includes(query)));
   $("#history-list").innerHTML = docs.length ? docs.map((doc) => {
@@ -264,7 +316,9 @@ function renderHistory() {
       <div><strong>${escaped(doc.number)}</strong><p>${displayDate(escaped(doc.date))}</p></div>
       <div>${escaped(doc.client)}${doc.quoteNumber ? "<p>Cotización " + escaped(doc.quoteNumber) + "</p>" : ""}</div>
       <strong>${pesos(amount)}</strong>
-      <button class="button button-secondary" type="button" data-open="${escaped(doc.number)}">Abrir</button>
+      <div class="history-actions"><button class="button button-secondary" type="button" data-open="${escaped(doc.id)}">Abrir</button>
+      ${doc.kind === "quote" ? '<button class="button button-secondary" type="button" data-invoice="' + escaped(doc.id) + '">' +
+        (database.docs.some(saved => saved.quoteId === doc.id) ? "Ver factura" : "Crear factura") + "</button>" : ""}</div>
     </div>`;
   }).join("") : '<p class="empty-history">' + (query ? "No se encontraron documentos." :
     listView === "quotes" ? "Todavía no hay cotizaciones guardadas." : "Todavía no hay facturas guardadas.") + "</p>";
@@ -280,12 +334,13 @@ function showHistory(view) {
   $("#history").hidden = false;
   highlightNav(view);
   renderHistory();
+  refreshHistory();
   window.scrollTo(0, 0);
 }
 
 async function canReplaceEditor() {
   if (busy) return false;
-  if (!dirty) return true;
+  if (!dirty || draftSafe) return true;
   const dialog = $("#discard-dialog");
   if (dialog.open) return false;
   dialog.returnValue = "cancel";
@@ -312,6 +367,8 @@ function validate() {
 }
 
 async function saveDocument() {
+  current.id ||= crypto.randomUUID();
+  if (dirty) keepDraft();
   const snapshot = structuredClone(current);
   snapshot.items = snapshot.items.filter(hasItemData);
   for (const key of documentFields) snapshot[key] = snapshot[key].trim();
@@ -320,23 +377,33 @@ async function saveDocument() {
     item.ref = item.ref.trim();
   }
   const saved = await transact((fresh) => {
+    const record = structuredClone(snapshot);
     if (!snapshot.number) {
-      const duplicate = snapshot.quoteNumber && fresh.docs.find((doc) => doc.quoteNumber === snapshot.quoteNumber);
+      const prior = fresh.docs.find(doc => doc.id === snapshot.id);
+      if (prior) {
+        const { number, revision, ...previous } = prior;
+        if (JSON.stringify(previous) === JSON.stringify(snapshot)) return prior;
+        throw new Error("Este documento ya se guardó. Abre la versión guardada en el historial.");
+      }
+      const duplicate = snapshot.quoteId && fresh.docs.find((doc) => doc.quoteId === snapshot.quoteId);
       if (duplicate) throw new Error("Ya existe una factura para esta cotización. Ábrela desde el historial.");
       const quote = snapshot.kind === "quote";
       const counter = quote ? "nextQuote" : "nextInvoice";
-      snapshot.number = (quote ? "COT-" : "FAC-") + String(fresh[counter]++).padStart(4, "0");
+      record.number = (quote ? "COT-" : "FAC-") + String(fresh[counter]++).padStart(4, "0");
     } else {
-      const stored = fresh.docs.find((doc) => doc.number === snapshot.number);
+      const stored = fresh.docs.find((doc) => doc.id === snapshot.id);
       if (stored?.revision !== snapshot.revision) {
-        throw new Error("Este documento cambió en otra pestaña. Ábrelo de nuevo desde el historial.");
+        throw new Error("Se guardó otra versión de este documento. Tu borrador sigue disponible. Abre la versión guardada desde el historial.");
       }
     }
-    snapshot.revision = (snapshot.revision || 0) + 1;
-    fresh.docs = [snapshot, ...fresh.docs.filter((doc) => doc.number !== snapshot.number)];
-    return snapshot;
+    record.revision = (snapshot.revision || 0) + 1;
+    fresh.docs = [record, ...fresh.docs.filter((doc) => doc.id !== record.id)];
+    return record;
   });
   current = saved;
+  if (lastDraft && localStorage.getItem(draftKey) === lastDraft) localStorage.removeItem(draftKey);
+  lastDraft = null;
+  draftSafe = false;
   renderItems();
   dirty = false;
   renderHeading();
@@ -382,12 +449,14 @@ form.addEventListener("input", (event) => {
     if (field.name === "tax") updateItemTax();
   }
   dirty = true;
+  keepDraft();
   renderHeading();
   renderPreview();
 });
 
 function updateItems(focusIndex) {
   dirty = true;
+  keepDraft();
   renderHeading();
   renderItems();
   renderPreview();
@@ -429,9 +498,17 @@ $("#convert").onclick = () => handleDocument(() => {
     loadEditor(linked);
     return;
   }
-  const { number, revision, ...source } = current;
-  loadEditor({ ...source, kind: "invoice", quoteNumber: number, date: today() });
+  const pending = drafts().find(entry => entry.doc.kind === "invoice" && !entry.doc.number && entry.doc.quoteId === current.id);
+  if (pending) {
+    loadEditor(pending.doc, pending.key);
+    notify("Abriste el borrador de factura de esta cotización.");
+    return;
+  }
+  const { number, revision, id, ...source } = current;
+  loadEditor({ ...source, kind: "invoice", quoteId: id, quoteNumber: number, date: today() });
   dirty = true;
+  keepDraft();
+  renderHeading();
   notify("Factura preparada. Selecciona la garantía y guarda el documento.");
 });
 
@@ -445,10 +522,19 @@ document.querySelectorAll("[data-view]").forEach((button) => {
   button.onclick = () => showHistory(button.dataset.view);
 });
 $("#history-list").onclick = async (event) => {
-  const button = event.target.closest("[data-open]");
+  const button = event.target.closest("[data-open], [data-invoice]");
   if (!button || !(await canReplaceEditor())) return;
-  const doc = database.docs.find((saved) => saved.number === button.dataset.open);
-  if (doc) loadEditor(doc);
+  const doc = database.docs.find((saved) => saved.id === (button.dataset.open || button.dataset.invoice));
+  if (doc) {
+    loadEditor(doc);
+    if (button.dataset.invoice) $("#convert").click();
+  }
+};
+$("#draft-list").onclick = async event => {
+  const key = event.target.closest("[data-draft]")?.dataset.draft;
+  if (!key || !(await canReplaceEditor())) return;
+  const draft = drafts().find(entry => entry.key === key);
+  if (draft) loadEditor(draft.doc, key);
 };
 $("#search").oninput = renderHistory;
 $("#toggle-preview").onclick = (event) => {
@@ -499,8 +585,86 @@ window.addEventListener("storage", (event) => {
   else renderHeading();
 });
 window.addEventListener("beforeunload", (event) => {
-  if (dirty) event.preventDefault();
+  if (dirty && !draftSafe) event.preventDefault();
 });
 
+let refreshing = false;
+let lastSyncError = "";
+function updateAccount() {
+  const connected = privateHistory.connected;
+  $("#account").textContent = connected ? (lastSyncError ? "Revisar conexión" : "Historial privado") : "Conectar historial privado";
+  $("#cloud-status").textContent = lastSyncError || (connected ? "Conectado a MK-RAFAEL." : "Conexión con tu cuenta de GitHub.");
+  $("#account-connect").hidden = connected;
+  $("#disconnect").hidden = !connected;
+  $("#cloud-submit").textContent = connected ? "Actualizar historial" : "Conectar y sincronizar";
+  $("#history-description").textContent = lastSyncError || (connected ? "Cotizaciones y facturas de tu cuenta privada." :
+    database.paired ? "Copia de este dispositivo. Conecta tu cuenta para actualizarla." : "Documentos de este dispositivo. Conecta tu cuenta para sincronizarlos.");
+}
+
+async function refreshHistory() {
+  if (refreshing || !privateHistory.connected || busy) return;
+  refreshing = true;
+  try {
+    await transact();
+    lastSyncError = "";
+    if (!$("#history").hidden) renderHistory();
+    else renderHeading();
+  } catch (error) {
+    lastSyncError = error.message;
+  } finally {
+    refreshing = false;
+    updateAccount();
+  }
+}
+
+$("#account").onclick = () => {
+  updateAccount();
+  $("#account-dialog").showModal();
+};
+$("#account-form").onsubmit = async event => {
+  event.preventDefault();
+  const input = $("#cloud-key");
+  const connecting = !privateHistory.connected;
+  if (connecting && !input.value.trim()) { input.focus(); return; }
+  const key = input.value.trim();
+  if (connecting && !key.startsWith("github_pat_")) {
+    $("#cloud-status").textContent = "Usa una clave de acceso de permisos específicos (fine-grained).";
+    return;
+  }
+  const submit = $("#cloud-submit");
+  submit.disabled = true;
+  $("#disconnect").disabled = true;
+  $("#cloud-status").textContent = "Sincronizando el historial…";
+  try {
+    if (connecting) privateHistory.setToken(key);
+    await transact();
+    if (connecting) privateHistory.setToken(key, true);
+    input.value = "";
+    lastSyncError = "";
+    if (!dirty && !current.number && !current.quoteId) current.company = { ...database.company };
+    $("#account-dialog").close();
+    showHistory("quotes");
+    notify("Historial privado sincronizado.");
+  } catch (error) {
+    if (connecting) privateHistory.setToken("");
+    lastSyncError = error.message;
+  } finally {
+    submit.disabled = false;
+    $("#disconnect").disabled = false;
+    updateAccount();
+  }
+};
+$("#disconnect").onclick = () => {
+  privateHistory.setToken("");
+  lastSyncError = "";
+  updateAccount();
+  $("#account-dialog").close();
+  notify("Sesión desconectada. Este navegador conserva su copia del historial.");
+};
+window.addEventListener("focus", refreshHistory);
+window.addEventListener("online", refreshHistory);
+setInterval(() => { if (document.visibilityState === "visible") refreshHistory(); }, 60000);
 loadEditor(current);
+updateAccount();
+if (database.docs.length || drafts().length || privateHistory.connected) showHistory("quotes");
 if (startupError) notify("No se pudo leer el historial de este navegador.", true);

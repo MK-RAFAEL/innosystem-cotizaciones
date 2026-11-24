@@ -147,6 +147,15 @@ textarea { resize: vertical; }
 .preview-message { padding: 0 7px; }
 
 .history-panel { max-width: 1000px; }
+.account-actions, .history-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#account-connect { line-height: 1.5; overflow-wrap: anywhere; }
+#account-connect ol { padding-left: 22px; }
+#account-connect li { margin-bottom: 7px; }
+@media screen and (max-width: 600px) {
+  .topbar { flex-wrap: wrap; padding-block: 7px; }
+  .account-actions { width: 100%; justify-content: space-between; }
+  .history-actions { grid-column: 1 / -1; }
+}
 .search { display: flex; align-items: center; gap: 9px; max-width: 425px; margin-bottom: 17px; color: var(--muted); }
 .search input { margin: 0; }
 .history-row { display: grid; grid-template-columns: .8fr 1.5fr .8fr auto; gap: 12px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }

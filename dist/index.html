@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="pdf-lib.min.js" defer></script>
   <script src="customer-pdf.js" defer></script>
+  <script src="private-history.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -47,7 +48,7 @@
     <main class="main">
       <header class="topbar">
         <div class="breadcrumbs"><span>Documentos</span><svg class="icon"><use href="#i-chevron"/></svg><strong id="breadcrumb">Nueva cotización</strong></div>
-        <button type="button" class="button button-quiet" id="history-button"><svg class="icon"><use href="#i-clock"/></svg><span>Historial</span></button>
+        <div class="account-actions"><button type="button" class="button button-secondary" id="account">Conectar historial privado</button><button type="button" class="button button-quiet" id="history-button"><svg class="icon"><use href="#i-clock"/></svg><span>Historial</span></button></div>
       </header>
       <div class="workspace" id="editor">
         <div class="page-heading">
@@ -112,12 +113,28 @@
         <div class="page-heading"><div><h1 id="history-title">Cotizaciones</h1><p id="history-description">Consulta los documentos guardados en este navegador.</p></div><button type="button" class="button button-primary" id="return-editor"><svg class="icon"><use href="#i-file"/></svg> Volver al editor</button></div>
         <div class="panel history-panel">
           <label class="search"><svg class="icon"><use href="#i-search"/></svg><span class="sr-only">Buscar documentos</span><input id="search" type="search" placeholder="Buscar por cliente o número"></label>
+          <div id="draft-list"></div>
           <div id="history-list"></div>
         </div>
       </section>
     </main>
   </div>
 
+  <dialog id="account-dialog" aria-labelledby="account-title">
+    <form id="account-form">
+      <div class="dialog-heading"><div><h2 id="account-title">Historial privado</h2><p id="cloud-status" role="status"></p></div><button type="button" class="icon-button" data-close="account-dialog" aria-label="Cerrar">×</button></div>
+      <div id="account-connect">
+        <p>Conecta este dispositivo a la cuenta MK-RAFAEL. Se incorporarán sus documentos guardados al historial privado.</p>
+        <ol><li><a href="https://github.com/settings/personal-access-tokens/new?name=InnoSystem%20historial&amp;target_name=MK-RAFAEL&amp;contents=write" target="_blank" rel="noopener noreferrer">Crear una clave de acceso en GitHub</a>.</li><li>En <b>Repository access</b>, selecciona solo <b>innosystem-historial-privado</b>. En <b>Contents</b>, elige <b>Read and write</b>.</li><li>Genera la clave y pégala aquí.</li></ol>
+        <label>Clave de acceso privada<input id="cloud-key" type="password" autocomplete="off" spellcheck="false"></label>
+        <p>La conexión dura mientras mantengas esta pestaña abierta. Puedes volver a conectarte para recuperar el historial.</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="disconnect" hidden>Desconectar</button>
+        <button class="button button-primary" type="submit" id="cloud-submit">Conectar y sincronizar</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="pdf-dialog" aria-labelledby="pdf-dialog-title">
     <div class="dialog-heading"><div><h2 id="pdf-dialog-title">Documento PDF</h2><p>Descarga el PDF para enviarlo al cliente o ábrelo para imprimir.</p></div><button type="button" class="icon-button" data-close="pdf-dialog" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="dialog-actions"><a class="button button-secondary" id="pdf-open" target="_blank" rel="noopener">Abrir para imprimir</a><a class="button button-primary" id="pdf-download" download>Descargar PDF</a></div>
