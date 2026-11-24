@@ -6,7 +6,6 @@ const storageKey = "innosystem-documents-v1";
 const clientFields = ["client", "rnc", "phone", "attention", "recipient", "street", "sector", "municipality", "city"];
 const documentFields = [...clientFields, "date", "seller", "payment", "delivery", "warranty", "tax", "notes"];
 const companyFields = ["rnc", "phone", "email", "address"];
-const columns = ["Ref.", "Descripción", "Cant.", "Precio", "% Desc.", "ITBIS", "Subtotal"];
 const amounts = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const quantities = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const icons = (name) => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
@@ -149,8 +148,8 @@ function renderItems() {
   $("#items").innerHTML = current.items.map((item, i) => `
     <div class="item" data-index="${i}">
       <div class="item-heading">
-        <strong>Partida ${i + 1}</strong><output aria-label="Total de la partida"></output>
-        <button type="button" class="icon-button" data-remove aria-label="Eliminar partida ${i + 1}">${icons("trash")}</button>
+        <strong>Producto ${i + 1}</strong><output aria-label="Total del producto"></output>
+        <button type="button" class="icon-button" data-remove aria-label="Eliminar producto ${i + 1}">${icons("trash")}</button>
       </div>
       <div class="item-top">
         <label>Referencia<input data-field="ref" placeholder="Código" maxlength="40" value="${escaped(item.ref)}"></label>
@@ -197,17 +196,27 @@ function documentHtml(doc) {
   const items = doc.items.filter(hasItemData);
   const lines = items.map((item) => calculate(item, doc.tax));
   const sum = summarize(lines);
+  const hasDiscount = item => Number(item.discount) > 0;
+  const hasTax = item => doc.tax !== "none" && Number(item.rate) > 0;
+  const showDiscount = items.some(hasDiscount);
+  const showTax = items.some(hasTax);
+  const descriptionWidth = 29 + (showDiscount ? 0 : 9) + (showTax ? 0 : 12);
+  const columns = [
+    { label: "Ref.", width: 13, value: item => item.ref || "—" },
+    { label: "Descripción", width: descriptionWidth, value: item => item.description || "—" },
+    { label: "Cant.", width: 8, value: item => quantities.format(Number(item.qty) || 0) },
+    { label: "Precio", width: 14, value: item => money(Number(item.price) * 100 || 0) },
+  ];
+  if (showDiscount) columns.push({ label: "% Desc.", width: 9, value: item => hasDiscount(item) ? quantities.format(Number(item.discount)) + "%" : "" });
+  if (showTax) columns.push({ label: "ITBIS", width: 12, value: (item, line) => hasTax(item) ? money(line.tax) : "" });
+  columns.push({ label: "Subtotal", width: 15, value: (item, line) => money(line.base) });
   const company = doc.company;
   const address = [doc.street, doc.sector, doc.municipality, doc.city].filter(Boolean).join(", ");
   const contact = [company.phone, company.email, company.address].filter(Boolean).join(" · ");
   const rows = items.map((item, index) => {
     const line = lines[index];
-    const cells = [
-      item.ref || "—", item.description || "—", quantities.format(Number(item.qty) || 0),
-      money(Number(item.price) * 100 || 0), quantities.format(Number(item.discount) || 0) + "%",
-      money(line.tax), money(line.base),
-    ];
-    return "<tr>" + cells.map((cell, i) => '<td data-label="' + columns[i] + '">' + escaped(cell) + "</td>").join("") + "</tr>";
+    return "<tr>" + columns.map(column => '<td data-label="' + column.label + '">' +
+      escaped(column.value(item, line)) + "</td>").join("") + "</tr>";
   }).join("");
   return `
     <header class="doc-header">
@@ -229,14 +238,14 @@ function documentHtml(doc) {
         ${!doc.seller && !doc.payment && !(invoice ? doc.quoteNumber : doc.delivery) ? '<p class="faint">—</p>' : ""}
       </section>
     </div>
-    <table class="doc-table" aria-label="Partidas en pesos dominicanos">
-      <thead><tr>${columns.map((column) => '<th scope="col">' + column + '</th>').join("")}</tr></thead>
-      <tbody>${rows || '<tr><td class="faint empty-row" colspan="7">Las partidas aparecerán aquí.</td></tr>'}</tbody>
+    <table class="doc-table" aria-label="Productos en pesos dominicanos">
+      <thead><tr>${columns.map(column => '<th scope="col" style="width:' + column.width + '%">' + column.label + '</th>').join("")}</tr></thead>
+      <tbody>${rows || '<tr><td class="faint empty-row" colspan="' + columns.length + '">Los productos aparecerán aquí.</td></tr>'}</tbody>
     </table>
     <div class="doc-summary">
       <div><span>Subtotal</span><span>${pesos(sum.gross)}</span></div>
-      <div><span>Descuento</span><span>${pesos(sum.discount)}</span></div>
-      <div><span>ITBIS</span><span>${pesos(sum.tax)}</span></div>
+      ${showDiscount ? '<div><span>Descuento</span><span>' + pesos(sum.discount) + '</span></div>' : ""}
+      ${showTax ? '<div><span>ITBIS</span><span>' + pesos(sum.tax) + '</span></div>' : ""}
       <div class="doc-total"><span>Total</span><span>${pesos(sum.total)}</span></div>
     </div>
     ${doc.notes ? '<section class="doc-note"><h3>Observaciones</h3><p>' + escaped(doc.notes) + "</p></section>" : ""}
@@ -361,7 +370,7 @@ function validate() {
   client.setCustomValidity(client.value.trim() ? "" : "Escribe el nombre del cliente.");
   if (!current.items.some(hasItemData)) {
     const price = form.querySelector('[data-field="price"]');
-    price.setCustomValidity("Agrega un precio, una referencia o una descripción a una partida.");
+    price.setCustomValidity("Agrega un precio, una referencia o una descripción al producto.");
     price.reportValidity();
     price.setCustomValidity("");
     return false;

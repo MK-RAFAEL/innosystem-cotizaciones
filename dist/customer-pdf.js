@@ -101,12 +101,13 @@ async function makeCustomerPdf(paper, doc) {
     lines.forEach((line, n) => text(line, x, y - 33 - n * 13));
   });
   y -= boxHeight + 16;
-  const widths = [58, 156, 41, 78, 48, 70, 85];
-  const headers = Array.from(paper.querySelectorAll("th"), th => th.textContent);
+  const headers = Array.from(paper.querySelectorAll(".doc-table th"));
+  const widths = headers.map(th => (right - left) * parseFloat(th.style.width) / 100);
   function tableHeader() {
     page.drawRectangle({ x: left, y: y - 22, width: right - left, height: 22, color: ink });
     let x = left;
-    headers.forEach((label, i) => {
+    headers.forEach((th, i) => {
+      const label = th.textContent;
       if (i < 2) text(label, x + 5, y - 14, 8, bold, white);
       else alignRight(label, x + widths[i] - 5, y - 14, 8, bold, white);
       x += widths[i];
@@ -130,7 +131,7 @@ async function makeCustomerPdf(paper, doc) {
     y -= height;
     separator(y);
   }
-  ensure(110);
+  ensure(38 + 18 * paper.querySelector(".doc-summary").children.length);
   y -= 19;
   for (const row of paper.querySelector(".doc-summary").children) {
     const total = row.classList.contains("doc-total");
