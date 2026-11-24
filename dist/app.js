@@ -70,7 +70,7 @@ function transact(change) {
   return operation;
 }
 
-const newItem = () => ({ ref: "", description: "", qty: "1", price: "0", discount: "0", rate: "18" });
+const newItem = () => ({ ref: "", description: "", qty: "1", price: "0", discount: "", rate: "18" });
 function newQuote() {
   return {
     ...Object.fromEntries(documentFields.map((key) => [key, ""])),
@@ -139,9 +139,9 @@ function calculate(item, tax) {
   return { gross: Number(gross), discount: Number(rawDiscount), tax: Number(itbis), base: Number(discounted), total: Number(discounted + itbis) };
 }
 
-function numericInput(name, label, value, min, max) {
+function numericInput(name, label, value, min, max, required = true) {
   return '<label>' + label + '<input type="number" inputmode="decimal" data-field="' + name +
-    '" value="' + escaped(value) + '" min="' + min + '" max="' + max + '" step="0.01" required></label>';
+    '" value="' + escaped(value) + '" min="' + min + '" max="' + max + '" step="0.01"' + (required ? " required" : "") + '></label>';
 }
 
 function renderItems() {
@@ -158,7 +158,7 @@ function renderItems() {
       <div class="item-values">
         ${numericInput("qty", "Cantidad", item.qty, "0.01", "9999.99")}
         ${numericInput("price", "Precio unitario (RD$)", item.price, "0", "9999999.99")}
-        ${numericInput("discount", "Descuento (%)", item.discount, "0", "100")}
+        ${numericInput("discount", "Descuento % (opcional)", item.discount, "0", "100", false)}
         <div class="item-rate" ${current.tax === "none" ? "hidden" : ""}>${numericInput("rate", "ITBIS (%)", item.rate, "0", "100")}</div>
       </div>
     </div>`).join("");
