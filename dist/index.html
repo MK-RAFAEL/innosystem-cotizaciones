@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es-DO">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17152f">
+  <title>InnoSystem | Cotizaciones y facturas</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="pdf-lib.min.js" defer></script>
+  <script src="customer-pdf.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h6"/></symbol>
+    <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3l2 2 3-2 2 2 2-2 3 2 2-2v18l-2-2-3 2-2-2-2 2-3-2-2 2zM9 9h6m-6 4h6m-6 4h3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M10 3h4l.6 2.5 2 .9L19 5l2 3.5-1.8 1.8v3.4l1.8 1.8-2 3.5-2.4-1.4-2 .9L14 21h-4l-.6-2.5-2-.9L5 19l-2-3.5 1.8-1.8v-3.4L3 8.5 5 5l2.4 1.4 2-.9z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 9 4.5v9L12 21l-9-4.5v-9zM3 7.5l9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 8V3h12v5M6 17H4a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2M6 14h12v7H6zm-1-3h1"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2ZM7 3v6h9V3M7 21v-7h10v7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+  </svg>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <a class="brand" id="brand" href="#editor" aria-label="InnoSystem, inicio">
+        <span class="brand-mark"><img src="logo.jpg" alt=""></span>
+        <span class="brand-name">InnoSystem<span>Multiservice</span></span>
+      </a>
+      <button class="button new-button" id="new-quote" type="button"><svg class="icon"><use href="#i-plus"/></svg> Nueva cotización</button>
+      <nav class="navigation" aria-label="Principal">
+        <button class="nav-button" type="button" data-view="quotes" aria-current="page"><svg class="icon"><use href="#i-file"/></svg> Cotizaciones</button>
+        <button class="nav-button" type="button" data-view="invoices"><svg class="icon"><use href="#i-receipt"/></svg> Facturas</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="nav-button" id="settings" type="button"><svg class="icon"><use href="#i-settings"/></svg><span>Datos de empresa</span></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Documentos</span><svg class="icon"><use href="#i-chevron"/></svg><strong id="breadcrumb">Nueva cotización</strong></div>
+        <button type="button" class="button button-quiet" id="history-button"><svg class="icon"><use href="#i-clock"/></svg><span>Historial</span></button>
+      </header>
+      <div class="workspace" id="editor">
+        <div class="page-heading">
+          <div><span class="status" id="status">Borrador</span><h1 id="page-title">Nueva cotización</h1><p id="page-description">Registra el cliente y los servicios de instalación.</p></div>
+          <div class="page-actions">
+            <button type="button" class="button button-secondary" id="print"><svg class="icon"><use href="#i-print"/></svg> Imprimir / PDF</button>
+            <button type="submit" class="button button-primary" form="document-form" id="save"><svg class="icon"><use href="#i-save"/></svg><span>Guardar</span></button>
+          </div>
+        </div>
+        <div class="conversion-bar" id="conversion-bar" hidden><button type="button" class="button button-secondary convert-button" id="convert"><svg class="icon"><use href="#i-receipt"/></svg><span>Crear factura desde esta cotización</span></button></div>
+        <div class="editor-grid">
+          <form id="document-form" class="editor-form">
+            <section class="panel">
+              <div class="panel-heading"><span class="section-icon"><svg class="icon"><use href="#i-user"/></svg></span><h2>Datos del cliente</h2></div>
+              <div class="fields">
+                <label class="wide">Nombre o empresa <span class="required">*</span><input name="client" placeholder="Nombre del cliente" maxlength="140" required></label>
+                <label>RNC o cédula<input name="rnc" placeholder="Ej. 101234567" maxlength="24"></label>
+                <label>Teléfono<input name="phone" type="tel" placeholder="Ej. 809-555-0123" maxlength="32"></label>
+                <label>Atención a<input name="attention" placeholder="Persona de contacto" maxlength="100"></label>
+                <label>Enviar a<input name="recipient" placeholder="Correo o destinatario" maxlength="120"></label>
+              </div>
+              <details class="address">
+                <summary>Dirección del cliente</summary>
+                <div class="fields">
+                  <label class="wide">Calle y número<input name="street" placeholder="Calle y número" maxlength="160"></label>
+                  <label>Sector<input name="sector" maxlength="90"></label>
+                  <label>Municipio<input name="municipality" maxlength="90"></label>
+                  <label>Ciudad<input name="city" maxlength="90"></label>
+                </div>
+              </details>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><span class="section-icon"><svg class="icon"><use href="#i-file"/></svg></span><h2>Datos del documento</h2></div>
+              <div class="fields">
+                <label>Fecha de emisión <span class="required">*</span><input name="date" type="date" required></label>
+                <label>Vendedor<input name="seller" placeholder="Nombre del vendedor" maxlength="100"></label>
+                <label>Condición de pago<input name="payment" placeholder="Ej. Contado" maxlength="100"></label>
+                <label id="delivery-label">Tiempo de entrega<input name="delivery" placeholder="Ej. 3 días hábiles" maxlength="100"></label>
+                <label id="warranty-label" hidden>Garantía de instalación<select name="warranty"><option value="30">30 días</option><option value="60">60 días</option><option value="90">90 días</option></select></label>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><span class="section-icon"><svg class="icon"><use href="#i-box"/></svg></span><h2>Equipos y servicios</h2></div>
+              <label class="tax-field">Tratamiento del ITBIS<select name="tax"><option value="none">Sin ITBIS</option><option value="add">Agregar al precio</option><option value="included">Incluido en el precio</option></select></label>
+              <div id="items" class="items"></div>
+              <button type="button" class="button button-add" id="add-item"><svg class="icon"><use href="#i-plus"/></svg> Agregar partida</button>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><span class="section-icon"><svg class="icon"><use href="#i-file"/></svg></span><h2>Observaciones</h2></div>
+              <label class="sr-only" for="notes">Observaciones del documento</label>
+              <textarea name="notes" id="notes" rows="3" placeholder="Alcance del trabajo, condiciones u otras notas…" maxlength="2500"></textarea>
+            </section>
+          </form>
+          <aside class="preview-panel" aria-label="Vista previa del documento">
+            <div class="preview-heading"><span class="section-icon"><svg class="icon"><use href="#i-eye"/></svg></span><div><h2>Vista previa</h2><p>Formato carta · RD$</p></div><button type="button" class="button button-quiet mobile-preview" aria-expanded="true" aria-controls="paper-frame" id="toggle-preview">Ocultar</button></div>
+            <div class="paper-frame" id="paper-frame"><article class="document" id="paper"></article></div>
+            <div class="preview-bottom"><span><svg class="icon"><use href="#i-print"/></svg> Listo para imprimir o guardar en PDF</span></div>
+          </aside>
+        </div>
+      </div>
+      <section class="workspace" id="history" hidden>
+        <div class="page-heading"><div><h1 id="history-title">Cotizaciones</h1><p id="history-description">Consulta los documentos guardados en este navegador.</p></div><button type="button" class="button button-primary" id="return-editor"><svg class="icon"><use href="#i-file"/></svg> Volver al editor</button></div>
+        <div class="panel history-panel">
+          <label class="search"><svg class="icon"><use href="#i-search"/></svg><span class="sr-only">Buscar documentos</span><input id="search" type="search" placeholder="Buscar por cliente o número"></label>
+          <div id="history-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="pdf-dialog" aria-labelledby="pdf-dialog-title">
+    <div class="dialog-heading"><div><h2 id="pdf-dialog-title">Documento PDF</h2><p>Descarga el PDF para enviarlo al cliente o ábrelo para imprimir.</p></div><button type="button" class="icon-button" data-close="pdf-dialog" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-actions"><a class="button button-secondary" id="pdf-open" target="_blank" rel="noopener">Abrir para imprimir</a><a class="button button-primary" id="pdf-download" download>Descargar PDF</a></div>
+  </dialog>
+  <dialog id="company-dialog">
+    <form id="company-form">
+      <div class="dialog-heading"><div><h2>Datos de empresa</h2><p>Aparecen en los documentos nuevos.</p></div><button type="button" class="icon-button" data-close="company-dialog" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div class="fields">
+        <label>RNC<input name="rnc" maxlength="30"></label>
+        <label>Teléfono<input name="phone" type="tel" maxlength="32"></label>
+        <label class="wide">Correo electrónico<input name="email" type="email" maxlength="120"></label>
+        <label class="wide">Dirección<input name="address" maxlength="180"></label>
+      </div>
+      <div class="dialog-actions"><button type="button" class="button button-secondary" data-close="company-dialog">Cancelar</button><button type="submit" class="button button-primary">Guardar datos</button></div>
+    </form>
+  </dialog>
+  <dialog id="discard-dialog">
+    <form method="dialog">
+      <div class="dialog-heading"><div><h2>Cambios sin guardar</h2><p>Si continúas, perderás los cambios de este documento.</p></div></div>
+      <div class="dialog-actions"><button value="cancel" class="button button-secondary" autofocus>Seguir editando</button><button value="discard" class="button button-primary">Continuar</button></div>
+    </form>
+  </dialog>
+  <div class="toast" role="status" hidden id="toast"></div>
+  <div class="print-root" id="print-root"></div>
+</body>
+</html>
